@@ -1,1 +1,1 @@
-print("Github")
+print("Github is activated")
