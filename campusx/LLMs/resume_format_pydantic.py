@@ -1,13 +1,10 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.pydantic_v1 import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from typing import List, Optional
-import os
 import json
-import re
 
 # ----------------------------
 # Step 1: PDF text extractor
@@ -22,88 +19,91 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 # ----------------------------
-# Step 2: Safe JSON parser
-# ----------------------------
-def parse_json_from_string(input_str: str):
-    """
-    Safely parse a JSON string, removing Markdown ```json fences if present.
-    """
-    cleaned_str = re.sub(r"```json\s*|\s*```", "", input_str, flags=re.IGNORECASE).strip()
-    try:
-        return json.loads(cleaned_str)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON: {e}")
-
-
-# ----------------------------
-# Step 3: Define Pydantic model
+# Step 2: Define Pydantic model
 # ----------------------------
 class ResumeInfo(BaseModel):
-    name: str = Field(..., description="Full name of the candidate")
-    email: str = Field(..., description="Email address")
+    name: str = Field(..., description="Full name of the candidate")    #  ... means required
+    email: str = Field(..., description="Email address")                #   None -> Optional
     phone: str = Field(..., description="Phone number")
     linkedin: Optional[str] = Field(None, description="LinkedIn profile URL")
     github: Optional[str] = Field(None, description="GitHub profile URL")
     portfolio: Optional[str] = Field(None, description="Portfolio or personal website")
-    skills: List[str] = Field(default_factory=list, description="List of skills")
-    education: Optional[str] = Field(None, description="Education details")
-    experience: Optional[str] = Field(None, description="Experience summary")
+    skills: List[str] = Field(default_factory=list, description="List of all skills combined")
+    education: Optional[str] = Field(None, description="Education details as single string")
+    experience: Optional[str] = Field(None, description="Experience summary as single string")
     projects: List[str] = Field(default_factory=list, description="List of project names")
 
 
 # ----------------------------
-# Step 4: Load model and environment
+# Step 3: Load model and environment
 # ----------------------------
 load_dotenv()
 model = init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+structured_llm = model.with_structured_output(ResumeInfo)
 
 # ----------------------------
-# Step 5: Prompt setup
+# Step 4: Prompt setup
 # ----------------------------
 chat_template = ChatPromptTemplate.from_messages([
-    ("system", 
-     "You are a professional resume analyzer. "
-     "Extract structured information from the given resume text and "
-     "return data that exactly matches this JSON schema:\n\n"
-     "{\n"
-     "  'name': str,\n"
-     "  'email': str,\n"
-     "  'phone': str,\n"
-     "  'linkedin': str,\n"
-     "  'github': str,\n"
-     "  'portfolio': str,\n"
-     "  'skills': list of strings,\n"
-     "  'education': str,\n"
-     "  'experience': str,\n"
-     "  'projects': list of strings\n"
-     "}\n\n"
-     "Return only valid JSON."),
-    ("human", "Here is the resume text:\n{resume_text}")
+    ("system", """You are a professional resume analyzer. 
+Extract structured information from the resume and flatten all nested data.
+Combine all skills into a single list."""),
+    ("human", "Resume text:\n{resume_text}")
 ])
 
 # ----------------------------
-# Step 6: Run analyzer
+# Step 5: Run analyzer
 # ----------------------------
 pdf_path = input("Enter PDF path: ").strip()
 resume_text = extract_text_from_pdf(pdf_path)
 
-formatted_prompt = chat_template.invoke({
-    "resume_text": resume_text
-})
+# Create chain and invoke
+chain = chat_template | structured_llm
+resume_obj = chain.invoke({"resume_text": resume_text})
 
-result = model.invoke(formatted_prompt)
-print("\n--- Raw Model Output ---\n")
-print(result.content)
+print("\n--- Pydantic Object ---")
+print(resume_obj)
 
 # ----------------------------
-# Step 7: Validate with Pydantic
+# Step 6: Access data in multiple ways
 # ----------------------------
-print("\n--- Parsed and Validated Output ---\n")
-try:
-    parsed_resume = parse_json_from_string(result.content)
-    resume_obj = ResumeInfo(**parsed_resume)  # Validate with Pydantic
-    print(resume_obj.json(indent=2))
-except ValueError as e:
-    print(f"JSON parsing error: {e}")
-except ValidationError as e:
-    print("Validation error:\n", e.json(indent=2))
+
+# Method 1: Direct attribute access (recommended)
+print("\n--- Method 1: Attribute Access ---")
+print(f"Name: {resume_obj.name}")
+print(f"Email: {resume_obj.email}")
+print(f"Phone: {resume_obj.phone}")
+print(f"Skills: {resume_obj.skills}")
+
+# # Method 2: Convert to dictionary
+# print("\n--- Method 2: Dictionary Access ---")
+# resume_dict = resume_obj.model_dump()  # or dict(resume_obj)
+# print(f"Name: {resume_dict['name']}")
+# print(f"Email: {resume_dict['email']}")
+# print(f"Skills count: {len(resume_dict['skills'])}")
+
+# Method 3: Convert to JSON string
+print("\n--- Method 3: JSON String ---")
+json_string = resume_obj.model_dump_json(indent=2)
+print(json_string)
+
+# # Method 4: Parse JSON string back to dict (if you need it)
+# print("\n--- Method 4: JSON → Dict ---")
+# data = json.loads(json_string)
+# print(f"Name from parsed JSON: {data['name']}")
+# print(f"Projects: {data['projects']}")
+
+# ----------------------------
+# Step 7: Complete example
+# ----------------------------
+print("\n--- Complete Resume Summary ---")
+print(f"Candidate: {resume_obj.name}")
+print(f"Contact: {resume_obj.email} | {resume_obj.phone}")
+print(f"LinkedIn: {resume_obj.linkedin or 'Not provided'}")
+print(f"GitHub: {resume_obj.github or 'Not provided'}")
+print(f"\nSkills ({len(resume_obj.skills)}): {', '.join(resume_obj.skills[:10])}...")
+print(f"\nEducation: {resume_obj.education}")
+print(f"\nExperience: {resume_obj.experience}")
+print(f"\nProjects ({len(resume_obj.projects)}):")
+for i, project in enumerate(resume_obj.projects, 1):
+    print(f"  {i}. {project}")
