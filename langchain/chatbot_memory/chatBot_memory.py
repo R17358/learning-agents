@@ -10,7 +10,8 @@ load_dotenv()
 api = os.getenv("GOOGLE_API_KEY")
 model = init_chat_model("gemini-2.5-flash", model_provider="google_genai", api_key=api)
 
-memory = ConversationBufferMemory()
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
 
 conversation = ConversationChain(
     llm=model,
