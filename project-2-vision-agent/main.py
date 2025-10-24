@@ -1,4 +1,3 @@
-
 from langchain.chat_models import init_chat_model
 from langchain.agents import AgentExecutor, create_openai_functions_agent
 from langchain.memory import ConversationBufferMemory
@@ -9,7 +8,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from tavily import TavilyClient
-from object_detect import detect
+from object_detection import detect_using_gemini
 
 load_dotenv()
 
@@ -18,7 +17,7 @@ tavily_api = os.getenv("TAVILY_API_KEY")
 
 @tool
 def search_on_internet(query: str) -> str:
-    """Search any topic on the internet using Tavily search engine."""
+    """Search given topic on the internet using Tavily search engine."""
     try:
         client = TavilyClient(api_key=tavily_api)
         results = client.search(query, max_results=3)
@@ -32,78 +31,42 @@ def search_on_internet(query: str) -> str:
             url = r.get("url", "No URL")
             content = r.get("content", "No description")
             
-            # Tavily usually provides well-formatted content already
             output += f"\n{i}. {title}\n   {content}\n   URL: {url}\n"
 
         return output
     except Exception as e:
         return f"Error performing search: {str(e)}"
 
-@tool
-def create_multiplication_table(n: int) -> str:
-    """Generate a multiplication table for a given number."""
-    try:
-        table = f"\n Multiplication Table for {n}:\n"
-        table += "=" * 30 + "\n"
-        for i in range(1, 11):
-            table += f"{n} x {i} = {n * i}\n"
-        return table
-    except Exception as e:
-        return f" Error: {str(e)}"
-
 
 @tool
-def open_camera() -> str:
-    """Opens camera, then if user pressed space then captures image, and then detect image and return its label to agent
-    IMPORTANT: This is a blocking operation. User will press SPACE to capture.
-    Returns the detected object label after capture.
+def detect_object():
+     """
+    Opens the camera to automatically capture an image after 6 seconds and detect objects in it.
+
+    The function waits 6 seconds after opening the camera, captures the image, 
+    detects object(s) in the image, searches for relevant information about the detected object online, 
+    and returns a descriptive label or summary.
+
+    Use this tool when the agent needs to:
+    - Capture a real-time image via camera automatically
+    - Recognize or classify an object in the image
+    - Retrieve informative details about the detected object
+
+    Returns:
+        str: A string describing the detected object, including its label and 
+            relevant information retrieved from the internet.
     """
-    try:
-        save_path = r"images\capture.jpg"
-        os.makedirs("images", exist_ok=True) 
-        cap = cv2.VideoCapture(0)
-        
-        if not cap.isOpened():
-            return " Camera is not openened"
-        
-        print(f"\n Camera opened!")
-        print(" Press 'SPACE' to capture the image or 'Q' to quit.")
-        
-        frame_count = 0
-        label = None
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            cv2.imshow('Camera Feed', frame)
-            
-            frame_count += 1
-            
-            key = cv2.waitKey(1)
-            if key == 32:  # SPACE key
-                # Save image
-                cv2.imwrite(save_path, frame)
-                print(f" Image saved as: {os.path.abspath(save_path)}")
-                label = detect(save_path)
-                
-                break
-            elif key == ord('q') or key == ord('Q'):
-                print(" Capture cancelled.")
-                break
-        
-        cap.release()
-        cv2.destroyAllWindows()
-        
-        if label:
-            print(label)
-            return label
-        
-        return f"\n Camera band ho gaya! Total {frame_count} frames captured, but object not detected."
+     save_path = os.path.join("images", "capture.jpg")
+     print(save_path)
+     try:
+        thing = detect_using_gemini(save_path)
+        print(f"\n Result to pass to agent: {thing}")
+        search_result_thing = search_on_internet(f"search important information about given object on internet:{thing} , but concise it to 5 lines.")
+        return f"{thing}: {search_result_thing}"
     
-    except Exception as e:
-        return f" Error: {str(e)}"
+     except Exception as e:
+        print(e)
+        return None
 
 
 @tool
@@ -144,27 +107,13 @@ def save_note(note: str) -> str:
         return f" Error saving note: {str(e)}"
 
 
-@tool
-def joke() -> str:
-    """Returns a random weather-related joke. No input needed."""
-    jokes = [
-        " Why did the weather want privacy? It was changing!",
-        " What did one cloud say to another? You're so cirrus!",
-        " What bow can't be tied? A rainbow!",
-        " What did the lightning bolt say? I'm shocking!",
-    ]
-    import random
-    return random.choice(jokes)
-
 
 tools = [
-    create_multiplication_table,
-    open_camera,
+    detect_object,
+    search_on_internet,
     get_current_time,
     calculator,
-    save_note,
-    joke,
-    search_on_internet  
+    save_note  
 ]
 
 
@@ -186,7 +135,7 @@ def create_agent():
         You have access to several tools, but you should only use them when they are clearly required.
 
         Your Capabilities:
-        - You can perform calculations, create multiplication tables, open the camera, tell the current time, save notes, and share jokes.
+        - You can perform calculations, open the camera and detect object, tell the current time, and save notes.
         - You can also search the internet using the Tavily Search Tool when the user asks for information that requires web results.
         - You remember previous user interactions and can use past context to give better, personalized answers.
         - You communicate naturally in Hinglish (English + Hindi mixed), keeping responses friendly, clear, and human-like.
@@ -198,11 +147,9 @@ def create_agent():
 
          When to use tools:
         - For math operations ➜ use `calculator`
-        - For multiplication tables ➜ use `create_multiplication_table`
-        - For opening the webcam ➜ use `open_camera`
+        - For opening the webcam, capturing photo or detecting object ➜ use `detect_object`
         - For checking current time ➜ use `get_current_time`
         - For saving notes ➜ use `save_note`
-        - For telling jokes ➜ use `joke`
         - For searching topics on the internet ➜ use `tavily_search_tool`
 
          Response Style:
@@ -220,7 +167,7 @@ def create_agent():
         MessagesPlaceholder(variable_name="agent_scratchpad")
     ])
     
-    # Create agent
+     # Create agent
     agent = create_openai_functions_agent(
         llm=model,
         tools=tools,
@@ -246,14 +193,12 @@ def main():
     print(" LangChain Agent with Memory and Tools)")
     print("=" * 60)
     print("\n Available capabilities:")
-    print("   • Answer questions and have conversations")
-    print("   • Create multiplication tables")
-    print("   • Open camera, capture photo and detect image")
-    print("   • Calculate math expressions")
-    print("   • Tell current time")
-    print("   • Save notes to file")
-    print("   • Share jokes")
-    print("   • Remember conversation history")
+    print("\n Search topic on internet")
+    print("\n Answer questions and have conversations")
+    print("\n Open camera, capture photo and detect image")
+    print("\n Calculate mathematical calculations")
+    print("\n Save notes to file")
+    print("\n Remember conversation history")
     print("\n Type 'exit' or 'quit' to stop\n")
     
     
