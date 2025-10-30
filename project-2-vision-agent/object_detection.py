@@ -31,9 +31,7 @@ def open_camera(save_path: str) -> str:
         print(" Position your object in frame...")
         
         start_time = time.time()
-        countdown_interval = 1 
-        last_countdown = 6
-        
+       
         captured_frame = None
         
         while True:
@@ -77,7 +75,7 @@ def open_camera(save_path: str) -> str:
             return " Failed to capture image"
         
        
-        print("\n🔍 Detecting object using Gemini Vision...")
+        print("\n Detecting object using Gemini Vision...")
         detected_object = detect_object_gemini(save_path)
         
         if detected_object:

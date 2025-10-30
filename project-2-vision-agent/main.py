@@ -62,6 +62,7 @@ def detect_object():
         thing = detect_using_gemini(save_path)
         print(f"\n Result to pass to agent: {thing}")
         search_result_thing = search_on_internet(f"search important information about given object on internet:{thing} , but concise it to 5 lines.")
+        save_note(f"{thing}: {search_result_thing}")
         return f"{thing}: {search_result_thing}"
     
      except Exception as e:
